@@ -8,7 +8,7 @@
 Fix NVIDIA GPUs hogging all that battery power!
 
 What's New:
-* Initial release
+* Added "on startup" trigger to scheduled task for better reliability
 
 To-do:
 * ???
@@ -21,7 +21,7 @@ INITIALIZATION
 #>
 
 # Version... obviously
-$version = "1.0"
+$version = "1.0.1"
 
 # NVBatMan data path
 $path = "$env:ProgramData\NVBatMan"
@@ -210,6 +210,9 @@ try {
         <URI>\NVBatMan</URI>
     </RegistrationInfo>
     <Triggers>
+        <BootTrigger>
+            <Enabled>true</Enabled>
+        </BootTrigger>
         <LogonTrigger>
             <Enabled>true</Enabled>
         </LogonTrigger>
