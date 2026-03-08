@@ -8,8 +8,7 @@
 Fix NVIDIA GPUs hogging all that battery power!
 
 What's New:
-* Added unlock task to improve trigger reliability
-* Added support for updating old versions directly (no need to uninstall first)
+* Added trigger on slow power source in addition to battery
 
 To-do:
 * ???
@@ -22,7 +21,7 @@ INITIALIZATION
 #>
 
 # Version... obviously
-$version = "1.0.2"
+$version = "1.0.3"
 
 # NVBatMan data path
 $path = "$env:ProgramData\NVBatMan"
@@ -162,12 +161,18 @@ if ($task.contains("Install") -or $task.contains("Update")) {
     $ps1 = @"
 <# NVBatMan by Lulech23 v$version #>
 function Set-GpuPowerState {
-    # Check current power status: True = AC, False = Battery
-    `$isOnAC = (Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus).PowerOnline
+    # Check current system power status
+    `$isPConAC = (Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus).PowerOnline
+
+    # Check current GPU power status
+    `$isGPUonAC = ((nvidia-smi --query-gpu=power.default_limit,enforced.power.limit --format=csv,noheader) -split ',' | ForEach-Object {
+        [double]($_.Replace("W", "").Trim())
+    })
+    `$isGPUonAC = (`$isGPUonAC[0] -le `$isGPUonAC[1])
     
-    if (-not `$isOnAC) {
-        <# DC (Battery) #>
-        Write-Host "Status: Battery. Applying GPU power limits..." -ForegroundColor Yellow
+    # Apply power limits based on current power status
+    if ((-not `$isPConAC) -or (-not `$isGPUonAC)) {
+        Write-Host "Status: DC. Applying GPU power limits..." -ForegroundColor Yellow
         
         # Disable NVIDIA Platform Controller to prevent clock speed overrides
         Get-PnpDevice -FriendlyName "NVIDIA Platform Controllers and Framework" | Disable-PnpDevice -Confirm:`$false
