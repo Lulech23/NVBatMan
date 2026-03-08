@@ -8,7 +8,8 @@
 Fix NVIDIA GPUs hogging all that battery power!
 
 What's New:
-* Added "on startup" trigger to scheduled task for better reliability
+* Added unlock task to improve trigger reliability
+* Added support for updating old versions directly (no need to uninstall first)
 
 To-do:
 * ???
@@ -21,10 +22,16 @@ INITIALIZATION
 #>
 
 # Version... obviously
-$version = "1.0.1"
+$version = "1.0.2"
 
 # NVBatMan data path
 $path = "$env:ProgramData\NVBatMan"
+
+# Old version (if any)
+$oldVersion = $version
+if (Test-Path "$path\NVBatMan.ps1") {
+    $oldVersion = ((Get-Content "$path\NVBatMan.ps1" -TotalCount 1) -replace '^<#(.*)v(.*)#>$','$2').Trim()
+}
 
 
 
@@ -33,9 +40,9 @@ SHOW VERSION
 #>
 
 # Ooo, shiny!
-Write-Host "`n                             " -BackgroundColor Green -NoNewline
+Write-Host "`n                               " -BackgroundColor Green -NoNewline
 Write-Host "`n NVBatMan [v$version] by Lulech23 " -NoNewline -BackgroundColor Green -ForegroundColor Black
-Write-Host "`n                             " -BackgroundColor Green
+Write-Host "`n                               " -BackgroundColor Green
 
 # About
 Write-Host "`nThis script will install a scheduled task to limit NVIDIA GPU power consumption"
@@ -46,9 +53,15 @@ Write-Host "`nTo undo changes and restore the original behavior, run this script
 # Current Status
 Write-Host "`nBattery Management is currently set to: " -NoNewline
 if (Test-Path "$path\NVBatMan.ps1") {
-    Write-Host "NVBatMan" -ForegroundColor Cyan
-    Write-Host " * System will balance GPU and CPU when operating on battery power" -ForegroundColor Gray
-    $task = "Revert to NVIDIA Platform Controllers and Framework"
+     if ($version -ne $oldVersion) {
+        Write-Host "NVBatMan (previous version)" -ForegroundColor Cyan
+        Write-Host " * System will balance GPU and CPU when operating on battery power" -ForegroundColor Gray
+        $task = "Update NVBatMan"
+    } else {
+        Write-Host "NVBatMan" -ForegroundColor Cyan
+        Write-Host " * System will balance GPU and CPU when operating on battery power" -ForegroundColor Gray
+        $task = "Revert to NVIDIA Platform Controllers and Framework"
+    }
 } else {
     Write-Host "NVIDIA Platform Controllers and Framework" -ForegroundColor Magenta
     Write-Host " * System may heavily throttle CPU when operating on battery power" -ForegroundColor Gray
@@ -68,10 +81,10 @@ Write-Host
 
 
 <#
-INSTALL NVBATMAN
+INSTALL/UPDATE NVBATMAN
 #>
 
-if ($task.contains("Install")) {
+if ($task.contains("Install") -or $task.contains("Update")) {
     # Get performance mode to apply on battery
     Write-Host "`nSelect the performance mode to apply when on battery:" -ForegroundColor Green
     Write-Host " 1" -NoNewLine -ForegroundColor Yellow
@@ -147,6 +160,7 @@ if ($task.contains("Install")) {
     
     # NVBatMan.ps1 - Main script to monitor power state and apply GPU power limits
     $ps1 = @"
+<# NVBatMan by Lulech23 v$version #>
 function Set-GpuPowerState {
     # Check current power status: True = AC, False = Battery
     `$isOnAC = (Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus).PowerOnline
@@ -216,6 +230,10 @@ try {
         <LogonTrigger>
             <Enabled>true</Enabled>
         </LogonTrigger>
+        <SessionStateChangeTrigger>
+            <Enabled>true</Enabled>
+            <StateChange>SessionUnlock</StateChange>
+        </SessionStateChangeTrigger>
     </Triggers>
     <Principals>
         <Principal id="Author">
@@ -224,14 +242,14 @@ try {
         </Principal>
     </Principals>
     <Settings>
-        <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
+        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
         <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-        <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
         <AllowHardTerminate>false</AllowHardTerminate>
         <StartWhenAvailable>true</StartWhenAvailable>
         <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
         <IdleSettings>
-            <StopOnIdleEnd>true</StopOnIdleEnd>
+            <StopOnIdleEnd>false</StopOnIdleEnd>
             <RestartOnIdle>false</RestartOnIdle>
         </IdleSettings>
         <AllowStartOnDemand>true</AllowStartOnDemand>
@@ -291,6 +309,7 @@ try {
 }
 
 
+
 <#
 UNINSTALL NVBATMAN
 #>
@@ -330,6 +349,7 @@ if ($task.contains("Revert")) {
 }
 
 
+
 <#
 FINALIZATION
 #>
@@ -342,8 +362,3 @@ for ($s = 10; $s -ge 0; $s--) {
     Start-Sleep -Seconds 1
 }
 Write-Host
-Write-Host "`nCleaning up..."
-Start-Sleep -Seconds 1
-
-# Delete temporary script files
-Start-Process powershell.exe -Command "Remove-Item -Path '$PSCommandPath' -Force"
