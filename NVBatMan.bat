@@ -8,10 +8,11 @@
 Fix NVIDIA GPUs hogging all that battery power!
 
 What's New:
-* Added trigger on slow power source in addition to battery
+* Fixed missing escape character causing GPU power detection to fail
+* Added system mutex to prevent multiple instances from running simultaneously
 
 To-do:
-* ???
+* Find better way to detect insufficient power supply that doesn't return false positives on AC power
 #>
 
 
@@ -21,7 +22,7 @@ INITIALIZATION
 #>
 
 # Version... obviously
-$version = "1.0.3"
+$version = "1.0.4"
 
 # NVBatMan data path
 $path = "$env:ProgramData\NVBatMan"
@@ -160,13 +161,20 @@ if ($task.contains("Install") -or $task.contains("Update")) {
     # NVBatMan.ps1 - Main script to monitor power state and apply GPU power limits
     $ps1 = @"
 <# NVBatMan by Lulech23 v$version #>
+`$singleInstance = `$false
+`$mutex = New-Object System.Threading.Mutex(`$true, "Global\NVBatMan", [ref]`$singleInstance)
+if (-not `$singleInstance) {
+    Write-Host "Status: Already running! Exiting..." -ForegroundColor Yellow
+    exit
+}
+
 function Set-GpuPowerState {
     # Check current system power status
     `$isPConAC = (Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus).PowerOnline
 
     # Check current GPU power status
     `$isGPUonAC = ((nvidia-smi --query-gpu=power.default_limit,enforced.power.limit --format=csv,noheader) -split ',' | ForEach-Object {
-        [double]($_.Replace("W", "").Trim())
+        [double](`$_.Replace("W", "").Trim())
     })
     `$isGPUonAC = (`$isGPUonAC[0] -le `$isGPUonAC[1])
     
@@ -212,6 +220,8 @@ try {
         Remove-Event -SourceIdentifier "BatteryStatusChanged"
     }
 } finally {
+    `$mutex.ReleaseMutex()
+    `$mutex.Dispose()
     Unregister-Event -SourceIdentifier "BatteryStatusChanged"
     Write-Host "Stopped monitoring power state."
 }
