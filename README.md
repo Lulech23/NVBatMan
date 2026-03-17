@@ -40,4 +40,6 @@ For most users, **Balanced Mode is recommended**. However, you can easily switch
 
 ## Known Issues
 * **Does not support NVIDIA Optimus in "NVIDIA GPU" mode!** Running the entire display on the NVIDIA GPU with limited power can result in massive lag!
-* **May not accurately detect USB-C power sources!** As of v1.0.3, NVBatMan will attempt to detect when an insufficient power source is connected and enable power limiting even while charging. Currently, this is done by checking whether NVIDIA automatically selects a TGP lower than the default setting. However, this condition can sometimes occur even on AC power, resulting in throttle. **If this happens**, simply disconnect and reconnect AC power to restore full performance.
+* **May not accurately detect USB-C power sources!** As of v1.0.3, NVBatMan will attempt to detect when an insufficient power source is connected and enable power limiting even while charging. Currently, this is done by checking whether NVIDIA automatically selects a TGP lower than the default setting. However, this condition can sometimes occur even on AC power, resulting in throttle. **If this happens**, run the "Stop NVBatMan" Start Menu shortcut added in v1.0.5 to return to normal power management.
+  * There is also a "Start NVBatMan" shortcut in case the reverse happens.
+  * These shortcuts do not override the Task Scheduler service--NVBatMan will continue to *attempt* to do its thing whenever further changes in power status are detected.
