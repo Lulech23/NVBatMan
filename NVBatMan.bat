@@ -8,8 +8,7 @@
 Fix NVIDIA GPUs hogging all that battery power!
 
 What's New:
-* Fixed missing escape character causing GPU power detection to fail
-* Added system mutex to prevent multiple instances from running simultaneously
+* Added support for explicitly enabling/disabling power limits via Start Menu shortcuts
 
 To-do:
 * Find better way to detect insufficient power supply that doesn't return false positives on AC power
@@ -22,10 +21,11 @@ INITIALIZATION
 #>
 
 # Version... obviously
-$version = "1.0.4"
+$version = "1.0.5"
 
 # NVBatMan data path
 $path = "$env:ProgramData\NVBatMan"
+$menu = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\NVBatMan"
 
 # Old version (if any)
 $oldVersion = $version
@@ -161,14 +161,18 @@ if ($task.contains("Install") -or $task.contains("Update")) {
     # NVBatMan.ps1 - Main script to monitor power state and apply GPU power limits
     $ps1 = @"
 <# NVBatMan by Lulech23 v$version #>
-`$singleInstance = `$false
-`$mutex = New-Object System.Threading.Mutex(`$true, "Global\NVBatMan", [ref]`$singleInstance)
-if (-not `$singleInstance) {
-    Write-Host "Status: Already running! Exiting..." -ForegroundColor Yellow
-    exit
-}
+param(
+    [switch] `$Enable,
+    [switch] `$Disable
+)
 
-function Set-GpuPowerState {
+
+
+<# 
+FUNCTIONS 
+#>
+
+function Set-GpuPowerState([Nullable[Boolean]] `$Limit) {
     # Check current system power status
     `$isPConAC = (Get-CimInstance -Namespace root/wmi -ClassName BatteryStatus).PowerOnline
 
@@ -177,9 +181,14 @@ function Set-GpuPowerState {
         [double](`$_.Replace("W", "").Trim())
     })
     `$isGPUonAC = (`$isGPUonAC[0] -le `$isGPUonAC[1])
+
+    # Check current power limit conditions
+    if (`$null -eq `$Limit) {
+        `$Limit = (-not `$isPConAC) -or (-not `$isGPUonAC)
+    }
     
     # Apply power limits based on current power status
-    if ((-not `$isPConAC) -or (-not `$isGPUonAC)) {
+    if (`$Limit) {
         Write-Host "Status: DC. Applying GPU power limits..." -ForegroundColor Yellow
         
         # Disable NVIDIA Platform Controller to prevent clock speed overrides
@@ -199,6 +208,35 @@ function Set-GpuPowerState {
         nvidia-smi -rmc
         nvidia-smi -rgc
     }
+}
+
+
+
+<#
+MANUAL
+#>
+
+if (`$Enable) {
+    Set-GpuPowerState -Limit `$true
+    exit
+}
+
+if (`$Disable) {
+    Set-GpuPowerState -Limit `$false
+    exit
+}
+
+
+
+<#
+SERVICE
+#>
+
+`$singleInstance = `$false
+`$mutex = New-Object System.Threading.Mutex(`$true, "Global\NVBatMan", [ref]`$singleInstance)
+if (-not `$singleInstance) {
+    Write-Host "Status: Already running! Exiting..." -ForegroundColor Yellow
+    exit
 }
 
 Register-WmiEvent -Query "SELECT * FROM Win32_PowerManagementEvent WHERE EventType = 10" -SourceIdentifier "BatteryStatusChanged"
@@ -321,6 +359,47 @@ try {
         Write-Host "Could not access required resources!"
         Write-Host "`nPlease ensure correct system permissions and run this script again."
     }
+
+
+
+    <#
+    SHORTCUTS
+    #>
+
+    # Ensure Start Menu shortcut directory exists
+    if (!(Test-Path $menu)) {
+        New-Item -ItemType Directory -Path $menu -Force
+    }
+
+    # Remove old shortcuts, if they exist
+    if (Test-Path "$menu\Start NVBatMan.lnk") {
+        Remove-Item "$menu\Start NVBatMan.lnk" -Force
+    }
+    if (Test-Path "$menu\Stop NVBatMan.lnk") {
+        Remove-Item "$menu\Stop NVBatMan.lnk" -Force
+    }
+    
+    # Create "Start NVBatMan" shortcut
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut("$menu\Start NVBatMan.lnk")
+    $shortcut.TargetPath = "powershell.exe"
+    $shortcut.Arguments = "-File `"$path\NVBatMan.ps1`" -Enable"
+    $shortcut.IconLocation = "C:\Windows\System32\wpdshext.dll, 13"
+    $shortcut.Save()
+    $bytes = [System.IO.File]::ReadAllBytes("$menu\Start NVBatMan.lnk")
+    $bytes[0x15] = $bytes[0x15] -bor 0x20                                   # Enable "Run as administrator" flag
+    [System.IO.File]::WriteAllBytes("$menu\Start NVBatMan.lnk", $bytes)
+    
+    # Create "Stop NVBatMan" shortcut
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut("$menu\Stop NVBatMan.lnk")
+    $shortcut.TargetPath = "powershell.exe"
+    $shortcut.Arguments = "-File `"$path\NVBatMan.ps1`" -Disable"
+    $shortcut.IconLocation = "C:\Windows\System32\wpdshext.dll, 9"
+    $shortcut.Save()
+    $bytes = [System.IO.File]::ReadAllBytes("$menu\Stop NVBatMan.lnk")
+    $bytes[0x15] = $bytes[0x15] -bor 0x20                                   # Enable "Run as administrator" flag
+    [System.IO.File]::WriteAllBytes("$menu\Stop NVBatMan.lnk", $bytes)
 }
 
 
@@ -335,6 +414,9 @@ if ($task.contains("Revert")) {
     Write-Host "`nUninstalling NVBatMan..."
     Start-Sleep -Seconds 1
 
+    # Remove Start Menu shortcuts
+    Remove-Item -Path "$menu" -Recurse -Force -ErrorAction SilentlyContinue
+
     # Unregister Scheduled Task
     if (Get-ScheduledTask -TaskName "NVBatMan" -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName "NVBatMan" -Confirm:$false
@@ -343,6 +425,10 @@ if ($task.contains("Revert")) {
     # Remove NVBatMan files from target folder
     Remove-Item -Path "$path\NVBatMan.ps1" -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$path\NVBatMan.xml" -Force
+
+    # Reset NVIDIA GPU clocks
+    nvidia-smi -rmc
+    nvidia-smi -rgc
 
     # Enable NVIDIA Platform Controller to restore default clock management
     Get-PnpDevice -FriendlyName "NVIDIA Platform Controllers and Framework" | Enable-PnpDevice -Confirm:$false
